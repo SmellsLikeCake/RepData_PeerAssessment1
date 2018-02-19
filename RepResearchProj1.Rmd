@@ -1,0 +1,222 @@
+---
+title: "Reproducible Research Project 1"
+author: "Helen"
+date: "10 February 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This is my first R Markdown document. I am going to practise using it by completing the Course Project tasks.
+
+## Loading and pre-processing the data
+
+### Question 1 - Load the data
+
+First I will load the libraries that I need as well as the data.
+
+```{r, error = FALSE, warning = FALSE, message = FALSE}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(lattice)
+
+activityData <- read.csv(unz("activity.zip", "activity.csv"), sep = ",")
+
+head(activityData)
+```
+
+### Question 2 - Process the data into a suitable format
+
+I have established from exploring the data that there are three columns - the first shows the number of steps taken in a 5 minute interval, the second has the date, and the third has the time. However the date and time are not in the most useful format, as can be seen from the extract below.
+
+```{r}
+activityData[107:112, ]
+```
+
+It can be seen that the time goes from 855 to 900 - i.e. 8.55 to 9.00.
+
+I will turn this into a more useful format - POSIXct. Firstly I need to manipulate the time into a format that is consistent for all times.
+
+```{r}
+times <- activityData[, 3]
+times_2 <- c()
+
+i <- 1
+
+while(i <= length(times)){
+  if(times[i] < 1000){
+    times_2[i] <- paste("0", times[i], sep = "")
+    if(times[i] < 100){
+      times_2[i] <- paste("00", times[i], sep = "")
+      if(times[i] < 10){
+        times_2[i] <- paste("000", times[i], sep = "")
+      } 
+    }
+  }  else
+    times_2[i] <- times[i]
+  i <- i + 1
+}
+
+activityData <- cbind(activityData, times_2)  
+
+activityData[c(1, 10, 100, 1000),]
+```
+
+Now I can change the format to POSIXct.
+
+```{r, warning = FALSE}
+activityData <- tbl_df(activityData)
+activityData <- mutate(activityData, datetime = paste(date, times_2, sep = " "))
+activityData$datetime <- as.POSIXct(activityData$datetime, format = "%Y-%m-%d %H%M")
+activityData
+```
+
+### Question 3 - Total number of steps per day
+
+I will now calculate the total number of steps that were taken each day, ignoring missing values.
+
+```{r}
+activityDataByDay <- group_by(activityData, date)
+totalperday <- summarise(activityDataByDay, sum(steps, na.rm = TRUE))
+names(totalperday) <- c("date", "total_steps")
+totalperday
+```
+
+### Question 4 - Histogram of steps taken each day
+
+```{r}
+hist(as.numeric(as.vector(totalperday$total_steps)))
+```
+
+### Question 5 - Mean and median of number of steps each day
+
+```{r}
+mean_steps <- mean(totalperday$total_steps)
+median_steps <- median(totalperday$total_steps)
+
+mean_steps
+median_steps
+```
+
+### Question 6 - Average number of steps for each 5 minute interval
+
+```{r}
+averageInterval <- group_by(activityData, times_2)
+averageInterval <- summarise(averageInterval, avg_steps = mean(steps, na.rm = TRUE))
+averageInterval
+
+plot(avg_steps ~ as.numeric(as.character(times_2)), averageInterval, type = "l")
+```
+
+### Question 7 - Which interval has the highest average steps?
+
+```{r}
+averageInterval[which.max(averageInterval$avg_steps), ]
+```
+
+### Question 8 - Total number of missing values
+```{r}
+sum(is.na(activityData$steps))
+```
+
+### Question 9 - Devise a strategy for filling in missing values
+
+Potential options
+- Use mean for the day
+- Use mean for the interval
+- Use value for interval before / after
+
+I will use mean for the interval.
+
+### Question 10 - Create the dataset with no missing values
+
+First I will add the average values for each interval onto the activityData dataset using merge.
+
+```{r}
+nrow(activityData)
+activityData <- merge(activityData, averageInterval)
+head(activityData)
+nrow(activityData)
+
+activityData <- tbl_df(activityData)
+activityData <- arrange(activityData, datetime)
+activityData
+
+```
+
+Now I will write a short program to create a vector of values which take the actual number of steps for each interval, if it exists, or the average if it does not.
+
+```{r}
+stepsComplete <- c()
+i <- 1
+
+while(i <= nrow(activityData)){
+   if(is.na(activityData$steps[i])){
+     stepsComplete[i] <- activityData$avg_steps[i]
+   } else
+     stepsComplete[i] <- activityData$steps[i]
+   i <- i + 1
+}
+
+activityData <- cbind(activityData, stepsComplete)
+head(activityData)
+```
+
+### Question 11 - Make a histogram of the steps with no missing values
+
+```{r}
+activityData <- tbl_df(activityData)
+activityData <- group_by(activityData, date)
+totalperdayComp <- summarise(activityData, totalStepsComp = sum(stepsComplete))
+totalperday <- summarise(activityData, totalSteps = sum(steps, na.rm = TRUE))
+hist(totalperdayComp$totalStepsComp, breaks = 5)
+```
+
+Let's compare the two histograms side by side
+
+```{r}
+par(mfrow = c(2, 1))
+hist(totalperday$totalSteps, breaks = 5)
+hist(totalperdayComp$totalStepsComp, breaks = 5)
+```
+
+We see that the proportion of intervals with a smaller number of steps has decreased when the averages are used as missing values rather than just removing them. This makes sense because NAs were treated effectively as zeros in the total before. As they now have an average value the total value for the day will be higher.
+
+Now we'll find the mean and median using the complete data.
+
+```{r}
+mean(totalperdayComp$totalStepsComp)
+median(totalperdayComp$totalStepsComp)
+```
+
+Unsurprisingly, both have increased because the total for each day will have got bigger or remained the same.
+
+Interestingly the values are now equal. I guess this makes sense because as you use more average values to fill the gaps more days will cluster around the average overall.
+
+### Question 12 - Separate into weekdays and weekends
+
+```{r, warning = FALSE}
+activityData <- mutate(activityData, dayOfWeek = factor(weekdays(datetime)))
+activityData$dayType <- activityData$dayOfWeek
+activityData$dayType[activityData$dayOfWeek == "Saturday" | activityData$dayOfWeek == "Sunday"] <- "weekend"
+activityData$dayType[activityData$dayType != "weekend"] <- "weekday"
+activityData$dayType <- as.factor(activityData$dayType)
+sum(activityData$dayType == "weekend")
+sum(activityData$dayType == "weekday")
+activityData
+```
+
+### Question 13 - Make a panel time series plot showing the average number of steps in each interval split between weekdays and weekends
+
+```{r}
+activityData <- group_by(activityData, times_2, dayType)
+activityDataDayType <- summarise(activityData, avg_steps_wk = mean(steps, na.rm = TRUE))
+
+xyplot(avg_steps_wk ~ as.numeric(as.character(times_2)) | dayType, activityDataDayType, type = "l", layout = c(1, 2))
+
+```
